@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix='rhun-installer-') as temporary:
         (latest / 'install.ps1').rename(latest / 'installer-unavailable.ps1')
         try:
             failed = paste(documented, success=False)
-            assert b'(404)' in failed.stdout, failed.stdout
+            assert b'404' in failed.stdout and b'Invoke-WebRequest' in failed.stdout, failed.stdout
             assert not documented.exists(), 'installation proceeded after a failed download'
         finally:
             (latest / 'installer-unavailable.ps1').rename(latest / 'install.ps1')
