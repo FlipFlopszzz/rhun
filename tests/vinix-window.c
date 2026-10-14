@@ -1,5 +1,6 @@
 // Exercise frame ownership, resize remapping and fd interests without a VM.
 #include <vinix_window.h>
+#include "../tools/vinix/clipboard.h"
 #include <assert.h>
 #include <poll.h>
 #include <stdint.h>
@@ -65,6 +66,17 @@ void nv_key(int symbol, int text, int mods) {
     last_key = symbol; last_text = text; last_mods = mods; last_base = rhun_g_key_base;
 }
 void nv_paste(const void *p, size_t n) { assert(n == 3 && memcmp(p, "a\0b", 3) == 0); }
+void nv_toast(const char *message) { (void)message; }
+void nv_clipboard_init(struct nv_clipboard *c, const char *path, void (*paste)(const void *, size_t), void (*error)(const char *)) {
+    (void)path; memset(c, 0, sizeof(*c)); c->paste = paste; c->error = error;
+}
+void nv_clipboard_close(struct nv_clipboard *c) { (void)c; }
+void nv_clipboard_focus(struct nv_clipboard *c, int focused) { c->focused = focused; if (!focused) c->state = 0; }
+void nv_clipboard_cancel_paste(struct nv_clipboard *c) { c->state = 0; }
+void nv_clipboard_tick(struct nv_clipboard *c) { (void)c; }
+int nv_clipboard_timeout(const struct nv_clipboard *c) { return c->state ? 20 : -1; }
+void nv_clipboard_copy(struct nv_clipboard *c, const void *p, size_t length) { (void)c; (void)p; (void)length; }
+void nv_clipboard_paste(struct nv_clipboard *c) { c->state = 1; }
 void nv_close_request(void) { rhun_g_quit = !refuse_close; }
 extern void nv_open(const char *), nv_draw(void), nv_events(void), nv_flush(void), nv_title(const char *);
 extern void nv_clip_set(const void *, size_t), nv_clip_get(void);
@@ -86,7 +98,9 @@ int main(void) {
     memcpy(queue[queued++].payload, keys, sizeof(keys) - 1);
     nv_events(); assert(last_key == 's' && !last_text && last_mods == 4 && last_base == 's');
     assert(rhun_g_key_base == 0);
-    nv_clip_set("a\0b", 3); nv_clip_get();
+    nv_clip_get(); assert(nv_timeout() == 20);
+    queue[queued++] = (vinix_window_event){.kind = VINIX_WINDOW_FOCUS, .value = 0}; nv_events();
+    assert(nv_timeout() == -1);
     refuse_close = 1;
     queue[queued++] = (vinix_window_event){.kind = VINIX_WINDOW_CLOSE};
     nv_events(); assert(!rhun_g_quit && !pending && rhun_g_dirty);

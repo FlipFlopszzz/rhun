@@ -85,4 +85,5 @@ CALLBACK nv_focus, rhun_app_on_focus
 CALLBACK nv_key, rhun_app_on_key
 CALLBACK nv_paste, rhun_app_on_paste
 CALLBACK nv_close_request, rhun_app_on_close
+CALLBACK nv_toast, rhun_app_toast
 .section .note.GNU-stack,"",@progbits

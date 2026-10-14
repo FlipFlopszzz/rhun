@@ -55,7 +55,7 @@ def main():
         subprocess.run(flags + optimize + ['-c', source, '-o', str(obj)], check=True)
         objects.append(obj)
     if args.window_sdk:
-        for source in ('tools/vinix/window.s', 'tools/vinix/window.c', 'tools/vinix/keyboard.c'):
+        for source in ('tools/vinix/window.s', 'tools/vinix/window.c', 'tools/vinix/keyboard.c', 'tools/vinix/clipboard.c'):
             obj = out / (Path(source).stem + ('-bridge.o' if source.endswith('.s') else '.o'))
             optimize = ['-O2'] if source.endswith('.c') else []
             subprocess.run(flags + optimize + ['-I' + str(args.window_sdk / 'include'), '-c', source, '-o', str(obj)], check=True)

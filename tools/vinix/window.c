@@ -1,5 +1,6 @@
 #include <vinix_window.h>
 #include "keyboard.h"
+#include "clipboard.h"
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,14 +19,14 @@ extern void nv_target(uint32_t *, int, int, int), nv_resize(int, int), nv_render
 extern void nv_motion(int, int), nv_button(int, int, int), nv_scroll(int, int, int);
 extern void nv_focus(int), nv_key(int, int, int), nv_paste(const void *, size_t);
 extern void nv_close_request(void);
+extern void nv_toast(const char *);
 
 static vinix_window *window;
 static vinix_framebuffer framebuffer;
 static struct nv_keyboard keyboard;
 static int descriptor = -1;
 static int connection_lost;
-static char *clipboard;
-static size_t clipboard_length;
+static struct nv_clipboard clipboard;
 static char window_title[129] = "rhun";
 
 static void fail(const vinix_window_error *error) {
@@ -35,7 +36,7 @@ static void fail(const vinix_window_error *error) {
 static void cleanup(void) {
     vinix_window_close(window);
     window = NULL;
-    free(clipboard);
+    nv_clipboard_close(&clipboard);
 }
 static void watch_events(void) {
     nv_watch_set_events(descriptor, POLLIN | (vinix_window_wants_write(window) == 1 ? POLLOUT : 0));
@@ -44,6 +45,7 @@ static void target(void) {
     nv_target(framebuffer.pixels, framebuffer.width, framebuffer.height, framebuffer.stride / 4);
 }
 static void key(uint32_t symbol, uint32_t text, unsigned mods, uint32_t base) {
+    nv_clipboard_cancel_paste(&clipboard);
     rhun_g_key_base = base;
     nv_key(symbol, text, mods);
     rhun_g_key_base = 0;
@@ -66,6 +68,7 @@ static void reopen(void) {
     nv_resize(framebuffer.width, framebuffer.height);
 }
 static void disconnected(void) {
+    nv_clipboard_focus(&clipboard, 0);
     // The desktop can close its socket before its queued CLOSE is delivered.
     // EOF must follow the same unsaved-file confirmation path as CLOSE.
     nv_close_request();
@@ -79,6 +82,7 @@ void nv_events(void) {
         switch (event.kind) {
         case VINIX_WINDOW_MOTION: nv_motion(event.x, event.y); break;
         case VINIX_WINDOW_BUTTON_DOWN: case VINIX_WINDOW_BUTTON_UP:
+            if (event.kind == VINIX_WINDOW_BUTTON_DOWN) nv_clipboard_cancel_paste(&clipboard);
             nv_motion(event.x, event.y);
             nv_button(event.value, event.kind == VINIX_WINDOW_BUTTON_DOWN, keyboard.mods);
             break;
@@ -99,6 +103,7 @@ void nv_events(void) {
             }
             break;
         case VINIX_WINDOW_FOCUS:
+            nv_clipboard_focus(&clipboard, event.value);
             if (!event.value) memset(&keyboard, 0, sizeof(keyboard));
             nv_focus(event.value); break;
         case VINIX_WINDOW_CLOSE:
@@ -115,9 +120,11 @@ void nv_flush(void) {
     vinix_window_error error = {0};
     if (vinix_window_wait(window, 0, &error) < 0) { disconnected(); return; }
     nv_events();
+    nv_clipboard_tick(&clipboard);
 }
 int nv_timeout(void) {
-    return rhun_g_dirty && vinix_window_frame_pending(window) == 0 ? 0 : -1;
+    if (rhun_g_dirty && vinix_window_frame_pending(window) == 0) return 0;
+    return nv_clipboard_timeout(&clipboard);
 }
 void nv_draw(void) {
     if (connection_lost) return;
@@ -145,12 +152,9 @@ void nv_title(const char *title) {
     watch_events();
 }
 void nv_clip_set(const void *text, size_t length) {
-    char *copy = malloc(length ? length : 1);
-    if (!copy) return;
-    if (length) memcpy(copy, text, length);
-    free(clipboard); clipboard = copy; clipboard_length = length;
+    nv_clipboard_copy(&clipboard, text, length);
 }
-void nv_clip_get(void) { if (clipboard) nv_paste(clipboard, clipboard_length); }
+void nv_clip_get(void) { nv_clipboard_paste(&clipboard); }
 void nv_open(const char *title) {
     vinix_window_error error = {0};
     if (vinix_window_api_version() != VINIX_WINDOW_API_VERSION) {
@@ -159,6 +163,7 @@ void nv_open(const char *title) {
     window = vinix_window_open(title, 1280, 800, &error);
     if (!window) { fail(&error); exit(1); }
     atexit(cleanup);
+    nv_clipboard_init(&clipboard, NULL, nv_paste, nv_toast);
     if (vinix_window_get_framebuffer(window, &framebuffer) < 0 ||
         framebuffer.format != VINIX_WINDOW_FORMAT_XRGB8888) exit(1);
     for (unsigned i = 0; i < 13; ++i) rhun_g_plat[i] = (uintptr_t)rhun_nv_nop;

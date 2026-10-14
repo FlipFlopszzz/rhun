@@ -58,6 +58,25 @@ The desktop should expose `/run/vinix-session.<uid>/windows`. Vinix's
 also documents the socket overrides. The October 12 ISO alone lacks this
 service. Omitting `--window-sdk` builds the previous X11 backend.
 
+Clipboard sharing additionally requires the bundled compositor patch, applied
+to Vinix commit `69d2faac9fc2f6516b1a3e1cdf0a115da39b779d` before building its desktop:
+
+```sh
+git -C /path/to/vinix apply \
+  /path/to/rhun/tools/vinix/patches/0001-framebuffer-session-clipboard.patch
+```
+
+The patch records a framebuffer client's authenticated Unix peer PID and lets
+it use the existing session clipboard broker after recent input in its focused
+window. It keeps the existing user identity, focus, gesture expiry and app
+clipboard permission checks. It adds a compositor regression test for those
+conditions. The patch retains Vinix's GPL-2.0-or-later licensing. The window
+SDK ABI remains version 2; this clipboard change requires only rebuilding and
+deploying the desktop, not changing the kernel or window SDK.
+While a framebuffer window has recent input, queued session actions are
+polled at most once per 20 ms. Notifications and service state retain their
+existing one-second refresh, and inactive windows do not enable fast polling.
+
 `window.s` bridges platform calls and editor callbacks while retaining the
 translated stack across nested C calls. `window.c` integrates the native
 event FD with rhun's poll loop, draws into XRGB8888 buffers, waits for frame
@@ -74,9 +93,16 @@ rhun-vinix-native /path/to/project
 
 The launcher keeps preferences under `/root/rhun-vinix/home`. `RHUN_VINIX_DIR`
 and `RHUN_VINIX_BIN` override those paths. The native compositor keeps running
-and other applications remain usable. Clipboard contents currently stay
-inside rhun; the window API does not provide a native desktop clipboard or
-cursor-shape requests. Vinix removes a window immediately on title-bar close,
+and other applications remain usable. `clipboard.c` shares plain text with
+native apps through `/run/vinix-session.<uid>/broker`, using
+`VINIX_SESSION_RUNTIME` when set. It publishes explicit copy offers and
+requests single-use paste tokens, then reads the authorized data. Requests
+are asynchronous and bounded to 64 KiB of text without NUL bytes. Unsupported
+data, denied access, missing services and timeouts show a toast; there is no
+fallback to a stale private clipboard. Focus loss, new typing or a mouse press
+cancel a pending paste. Rich clipboard formats and sharing with the Mac host
+are outside this experiment. The window API does not provide cursor-shape
+requests. Vinix removes a window immediately on title-bar close,
 so when rhun needs an unsaved-file confirmation it recreates the window to
 keep that dialog available. EOF and sends racing with the close follow the
 same confirmation path. Rhun's own window-management menu requests are not
@@ -87,6 +113,8 @@ the original userland, with kernel and desktop from Vinix commit
 `69d2faac9fc2f6516b1a3e1cdf0a115da39b779d`. The kernel was built with V commit
 `f6358ecff9cffbf2d8b03e6a09269aac7707e26c`; the desktop and SDK used
 `b3bebd3`. This is a local experiment, not an official Vinix release image.
+The clipboard test desktop also includes the bundled compositor patch.
+Use 8 GiB of VM memory for the desktop, rhun and native test applications.
 
 ## Full-screen X11 fallback
 
@@ -127,7 +155,10 @@ and themes.
 
 The native backend's host tests exercise fragmented Kitty records, Unicode,
 shortcuts, releases, frame ownership across resize, queued-write poll interests,
-binary clipboard text and unsaved-close window recreation. Run them with:
+paste cancellation and unsaved-close window recreation. The broker client test
+uses real Unix sockets to check fragmented records, Unicode and multiline
+text, the 64 KiB limit, denied requests, malformed records, cancellation and
+deadlines. Run them with:
 
 ```sh
 clang -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -137,6 +168,9 @@ clang -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I /path/to/window-sdk/include tools/vinix/window.c tools/vinix/keyboard.c \
   tests/vinix-window.c -o /tmp/vinix-window-test
 /tmp/vinix-window-test
+clang -Wall -Wextra -Werror -fsanitize=address,undefined \
+  tools/vinix/clipboard.c tests/vinix-clipboard.c -o /tmp/vinix-clipboard-test
+/tmp/vinix-clipboard-test
 ```
 
 The upstream Vinix C API qualification also passed for its shared and static
@@ -151,6 +185,13 @@ confirmation in a recreated window; cancelling preserved the edit, and undo
 returned it to the saved contents. The native service and other desktop apps
 stayed running throughout. The syscall ABI test and headless editing script
 also passed on the updated kernel.
+
+Clipboard qualification used real Ctrl+A/C/V/S input in rhun and Vinix's
+Text Editor. Copying from rhun into the native editor preserved UTF-8 accents,
+an emoji, tabs and multiple lines exactly in the saved file. Native editing
+then added distinct text, copied it back into rhun, and saved it. The bytes
+matched apart from rhun's existing final-newline-on-save setting. This test
+used the patched desktop on an ARM64 QEMU VM with 8 GiB of memory.
 
 This does not establish full feature parity or production readiness. Keep
 this work isolated until the guest compatibility and desktop integration have
