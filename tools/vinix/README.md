@@ -77,6 +77,28 @@ While a framebuffer window has recent input, queued session actions are
 polled at most once per 20 ms. Notifications and service state retain their
 existing one-second refresh, and inactive windows do not enable fast polling.
 
+File reloads additionally require the bundled kernel patch on that same Vinix
+base. Apply it before building and deploying the kernel:
+
+```sh
+git -C /path/to/vinix apply \
+  /path/to/rhun/tools/vinix/patches/0002-inotify-parent-events.patch
+V=/path/to/v/v /path/to/v/v run /path/to/vinix/tests/inotify-route/run.v
+```
+
+Vinix previously sent direct-write events only to watches on the file itself.
+The patch also sends file activity to a watch on its containing directory,
+with the child's name. It preserves direct watches and one-shot handling,
+avoids duplicating named namespace events, and respects `IN_EXCL_UNLINK`.
+This patch also retains Vinix's GPL-2.0-or-later licensing.
+
+The native build checks contents after a file notification because Vinix ext2
+timestamps have whole-second precision. A saved-byte fingerprint distinguishes
+same-size edits from late notifications of rhun's own saves, including when
+there are new unsaved edits. An empty reload is checked again after 100 ms
+before replacing nonempty text, to avoid losing the caret during a brief
+in-place truncation. A file left genuinely empty still reloads normally.
+
 `window.s` bridges platform calls and editor callbacks while retaining the
 translated stack across nested C calls. `window.c` integrates the native
 event FD with rhun's poll loop, draws into XRGB8888 buffers, waits for frame
@@ -113,7 +135,8 @@ the original userland, with kernel and desktop from Vinix commit
 `69d2faac9fc2f6516b1a3e1cdf0a115da39b779d`. The kernel was built with V commit
 `f6358ecff9cffbf2d8b03e6a09269aac7707e26c`; the desktop and SDK used
 `b3bebd3`. This is a local experiment, not an official Vinix release image.
-The clipboard test desktop also includes the bundled compositor patch.
+The test desktop includes the compositor patch, and the current kernel includes
+the directory notification patch. Earlier native images lack this kernel fix.
 Use 8 GiB of VM memory for the desktop, rhun and native test applications.
 
 ## Full-screen X11 fallback
@@ -192,6 +215,31 @@ an emoji, tabs and multiple lines exactly in the saved file. Native editing
 then added distinct text, copied it back into rhun, and saved it. The bytes
 matched apart from rhun's existing final-newline-on-save setting. This test
 used the patched desktop on an ARM64 QEMU VM with 8 GiB of memory.
+
+Core editor qualification runs in the guest without agent CLIs or network
+provider requests. Copy this worktree's `tests` directory and
+`src/app/keys.s` to the guest with their relative paths intact, then run:
+
+```sh
+RHUN_TEST_EXE=/root/rhun-vinix/rhun-native python3 tests/vinix-editor.py
+RHUN_TEST_EXE=/root/rhun-vinix/rhun-native python3 tests/vinix-editor.py --native
+```
+
+The first mode checks file reloads and conflicts, symlinks, directory recreation,
+session restoration, undo/redo, live settings, search/replace and Git operations
+in the guest's headless renderer. The second opens temporary native windows to
+check reloads, saves, conflicts, Unicode editing and a real terminal command.
+Both include same-size, same-timestamp edits, genuinely empty files and late
+save notifications. Projects, configuration and state are temporary; the tests
+leave the user's editing files alone.
+
+All 46 headless guest checks passed with the updated kernel and native binary.
+Native-window checks also verified these reload and conflict paths, Unicode
+saving and a real shell command. The deterministic timestamp checks pause the
+editor while writing and restoring the old timestamp: both failed with the
+previous binary and passed with the updated binary in headless and native
+windows. On macOS, 44 checks passed and the two Vinix timestamp checks were
+skipped; the 11 existing unit suites also matched their expected output.
 
 This does not establish full feature parity or production readiness. Keep
 this work isolated until the guest compatibility and desktop integration have
