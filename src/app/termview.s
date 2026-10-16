@@ -32,6 +32,7 @@ env: .quad 0
 g_face_term: .zero FACE_SIZE
 g_term_open: .long 0
 last_px: .long 0
+last_lh: .long 0                # cfg_term_line_height the metrics were made for
 tab_scroll: .long 0             # first session tab shown when they do not all fit
 .p2align 3
 last_font: .quad 0
@@ -97,7 +98,9 @@ cur_sess:
     jmp sess
 1:  ret
 
-# term_metrics(): the terminal face at the configured size
+# term_metrics(): the terminal face at the configured size, in its font (the editor's unless it has
+#   one of its own), and the line height: the font's own (ascent and descent) * line_height / 100,
+#   with the text in the middle, as terminals scale it: every step shows, and 1.0 is the font's
 term_metrics:
     push rbx
     cvtsi2ss xmm0, dword ptr [rip + cfg_term_font_size]
@@ -106,13 +109,20 @@ term_metrics:
     cmp ebx, 4
     jge 1f
     mov ebx, 4
-1:  mov rax, [rip + g_font_code]
+1:  mov rax, [rip + g_font_term]
+    test rax, rax
+    jnz 11f
+    mov rax, [rip + g_font_code]
+11: mov ecx, [rip + cfg_term_line_height]
     cmp rax, [rip + last_font]
     jne 2f
     cmp ebx, [rip + last_px]
+    jne 2f
+    cmp ecx, [rip + last_lh]
     je 9f
 2:  mov [rip + last_font], rax
     mov [rip + last_px], ebx
+    mov [rip + last_lh], ecx
     lea rdi, [rip + g_face_term]
     mov rsi, rax
     mov edx, ebx
@@ -122,13 +132,24 @@ term_metrics:
     jge 3f
     mov eax, 1
 3:  mov [rip + tcw], eax
-    mov eax, [rip + g_face_term + FACE_ascent]
-    mov [rip + tbase], eax
-    add eax, [rip + g_face_term + FACE_descent]
-    cmp eax, 2
+    mov ecx, [rip + g_face_term + FACE_ascent]
+    add ecx, [rip + g_face_term + FACE_descent]
+    cmp ecx, 2
     jge 4f
-    mov eax, 2
-4:  mov [rip + tlh], eax
+    mov ecx, 2
+4:  mov eax, ecx
+    imul eax, [rip + cfg_term_line_height]
+    add eax, 50
+    xor edx, edx
+    mov r8d, 100
+    div r8d
+    cmp eax, ecx
+    cmovl eax, ecx
+    mov [rip + tlh], eax
+    sub eax, ecx
+    sar eax, 1
+    add eax, [rip + g_face_term + FACE_ascent]
+    mov [rip + tbase], eax
 9:  pop rbx
     ret
 
@@ -884,7 +905,11 @@ FN term_panel_draw
     add ecx, [rsp + 12]
     sub ecx, eax
     sub ecx, [rip + g_mt + 4*MI_4]
-    mov [rsp + 28], ecx         # grid h
+    # no room is none, not a negative size: the cells are counted by unsigned division
+    test ecx, ecx
+    jns 21f
+    xor ecx, ecx
+21: mov [rsp + 28], ecx         # grid h
     M eax, MI_12
     mov ecx, [rsp]
     add ecx, eax
@@ -892,7 +917,10 @@ FN term_panel_draw
     mov ecx, [rsp + 8]
     sub ecx, eax
     sub ecx, eax
-    mov [rsp + 24], ecx         # grid w
+    test ecx, ecx
+    jns 22f
+    xor ecx, ecx
+22: mov [rsp + 24], ecx         # grid w
     mov eax, [rsp + 16]
     mov [rip + gx], eax
     mov eax, [rsp + 20]
@@ -2952,41 +2980,9 @@ link_open:
     js 9f
     mov dword ptr [rip + g_focus], FOCUS_EDITOR
     # at :LINE:COL, in a text tab
-    test r12d, r12d
-    jz 9f
-    mov rbx, [rip + g_doc]
-    test rbx, rbx
-    jz 9f
-    cmp qword ptr [rbx + DOC_img], 0
-    jne 9f
-    lea rsi, [r12 - 1]
-    mov rax, [rbx + DOC_nlines]
-    dec rax
-    cmp rsi, rax
-    cmova rsi, rax
-    mov r14, rsi
-    # Source-character columns, as in rustc diagnostics: tabs and wide glyphs each count once.
-    # The resulting byte position always lands on a UTF-8 character boundary.
-    lea edx, [r13 - 1]
-    test edx, edx
-    jns 2f
-    xor edx, edx
-2:  mov rdi, rbx
-    mov rsi, r14
-    call doc_pos_at_char
-    mov rdi, rbx
-    mov rsi, rax
-    xor edx, edx
-    call ed_set_cursor
-    mov ecx, [rip + g_ed_h_lines]
-    shr ecx, 1
-    mov rax, r14
-    sub rax, rcx
-    jns 3f
-    xor eax, eax
-3:  shl rax, 8
-    mov [rbx + DOC_scrolly], rax
-    mov dword ptr [rip + g_reveal], 1
+    mov edi, r12d
+    mov esi, r13d
+    call app_goto_line
 9:  mov dword ptr [rip + link_on], 0
     mov dword ptr [rip + g_dirty], 1
     EPILOGUE

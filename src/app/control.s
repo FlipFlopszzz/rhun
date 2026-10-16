@@ -472,6 +472,13 @@ c_scroll_x:
     xor eax, eax
     ret
 
+# print-settings: the rows the settings page shows, "section.key" each
+c_print_settings:
+    lea rdi, [rip + out]
+    call settings_dump
+    xor eax, eax
+    ret
+
 # print-scroll: "x=PX y=N max=PX track=X,Y,W,H", the editor's scroll (y in 1/256 lines)
 c_print_scroll:
     lea rdi, [rip + out]
@@ -766,7 +773,8 @@ c_print_project:
     xor eax, eax
     ret
 
-# print-tabs: "tabs=a | *b | c", the tab strip in order with the active tab starred
+# print-tabs: "tabs=^a | *b | c", the tab strip in order with pinned tabs marked ^ and the active tab
+#   starred
 c_print_tabs:
     PROLOGUE
     lea rdi, [rip + out]
@@ -780,7 +788,14 @@ c_print_tabs:
     lea rdi, [rip + out]
     lea rsi, [rip + .Ls_bar]
     call sb_push_cstr
-2:  cmp rbx, [rip + g_tab_cur]
+2:  mov rdi, rbx
+    call tab_pinned
+    test eax, eax
+    jz 21f
+    lea rdi, [rip + out]
+    mov esi, '^'
+    call sb_push_byte
+21: cmp rbx, [rip + g_tab_cur]
     jne 3f
     lea rdi, [rip + out]
     mov esi, '*'
@@ -1538,6 +1553,7 @@ on_client:
 .Lc_print_toast: .asciz "print-toast"
 .Lc_print_link: .asciz "print-link"
 .Lc_print_scroll: .asciz "print-scroll"
+.Lc_print_settings: .asciz "print-settings"
 .Lc_scroll_x: .asciz "scroll-x"
 .Lc_appearance: .asciz "appearance"
 .Lc_focus: .asciz "focus"
@@ -1590,6 +1606,7 @@ ctl_table:
     .quad .Lc_print_palette, c_print_palette, .Lc_print_menu, c_print_menu
     .quad .Lc_print_tip, c_print_tip, .Lc_print_toast, c_print_toast, .Lc_print_link, c_print_link
     .quad .Lc_print_term_cell, c_print_term_cell, .Lc_print_scroll, c_print_scroll
+    .quad .Lc_print_settings, c_print_settings
     .quad .Lc_scroll_x, c_scroll_x
     .quad .Lc_appearance, c_appearance, .Lc_print_appearance, c_print_appearance
     .quad .Lc_focus, c_focus, 0, 0
