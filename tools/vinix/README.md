@@ -98,6 +98,8 @@ same-size edits from late notifications of rhun's own saves, including when
 there are new unsaved edits. An empty reload is checked again after 100 ms
 before replacing nonempty text, to avoid losing the caret during a brief
 in-place truncation. A file left genuinely empty still reloads normally.
+Settings use a content fingerprint too, so quick external config changes apply
+even when their timestamps match the previous read or save.
 
 `window.s` bridges platform calls and editor callbacks while retaining the
 translated stack across nested C calls. `window.c` integrates the native
@@ -217,8 +219,9 @@ matched apart from rhun's existing final-newline-on-save setting. This test
 used the patched desktop on an ARM64 QEMU VM with 8 GiB of memory.
 
 Core editor qualification runs in the guest without agent CLIs or network
-provider requests. Copy this worktree's `tests` directory and
-`src/app/keys.s` to the guest with their relative paths intact, then run:
+provider requests. Copy this worktree's `tests` directory, `assets/fonts`,
+`src/app/keys.s` and `src/app/config.s` to the guest with their relative paths
+intact, then run:
 
 ```sh
 RHUN_TEST_EXE=/root/rhun-vinix/rhun-native python3 tests/vinix-editor.py
@@ -230,16 +233,32 @@ session restoration, undo/redo, live settings, search/replace and Git operations
 in the guest's headless renderer. The second opens temporary native windows to
 check reloads, saves, conflicts, Unicode editing and a real terminal command.
 Both include same-size, same-timestamp edits, genuinely empty files and late
-save notifications. Projects, configuration and state are temporary; the tests
-leave the user's editing files alone.
+save notifications, plus live Vim settings changes with restored timestamps.
+Projects, configuration and state are temporary; the tests leave the user's
+editing files alone.
 
-All 46 headless guest checks passed with the updated kernel and native binary.
-Native-window checks also verified these reload and conflict paths, Unicode
-saving and a real shell command. The deterministic timestamp checks pause the
-editor while writing and restoring the old timestamp: both failed with the
-previous binary and passed with the updated binary in headless and native
-windows. On macOS, 44 checks passed and the two Vinix timestamp checks were
-skipped; the 11 existing unit suites also matched their expected output.
+After merging main at `f2c0ca5` (0.17.15), all 48 headless guest checks and 15
+native-window checks passed. These cover reloads, conflicts, Unicode saving
+and a real shell command. The deterministic timestamp checks pause the editor
+while writing and restoring the old timestamp. The settings regression failed
+before the config fingerprint fix and passed afterward in both modes. On
+macOS, 45 core checks passed and three Vinix timestamp checks were skipped;
+15 unit suites matched their expected output, and all four terminal panel
+checks passed. Native and X11 static ARM64 builds succeeded, and the keyboard,
+window and clipboard host fixtures passed AddressSanitizer and
+UndefinedBehaviorSanitizer checks.
+
+Another 45 guest checks passed for pinned tabs, settings search, Git trust,
+terminal fonts and terminal panels. They require `stty` on `PATH`; the tested
+image includes the BusyBox applet but needs a `stty` symlink to `/bin/busybox`.
+The terminal panel fixture also finds Python on `PATH` when Vinix's Python
+leaves `sys.executable` empty. Run these checks with:
+
+```sh
+for name in tab-pin settings-search git-trust terminal-font terminal-panel; do
+  RHUN_TEST_EXE=/root/rhun-vinix/rhun-native python3 "tests/$name.py" || exit
+done
+```
 
 This does not establish full feature parity or production readiness. Keep
 this work isolated until the guest compatibility and desktop integration have

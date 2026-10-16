@@ -66,6 +66,28 @@ def main():
             self.command('cmd undo')
             self.wait_document('after!\n')
 
+        @unittest.skipIf(sys.platform == 'darwin', 'Vinix coarse timestamp compatibility')
+        def test_same_stamp_settings_apply_live(self):
+            config = self.work / 'config/rhun/config'
+            text = config.read_text().replace('[editor]\n', '[editor]\nvim_mode = false\n')
+            config.write_text(text)
+            self.start(self.file)
+            stamp = config.stat()
+            for enabled, key, expected in ((True, 'x', 'efore\n'),
+                                           (False, 'y', 'yefore\n')):
+                os.kill(self.process.pid, signal.SIGSTOP)
+                _, status = os.waitpid(self.process.pid, os.WUNTRACED)
+                self.assertTrue(os.WIFSTOPPED(status))
+                try:
+                    config.write_text(text.replace('vim_mode = false',
+                                                   'vim_mode = ' + str(enabled).lower()))
+                    os.utime(config, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                finally:
+                    os.kill(self.process.pid, signal.SIGCONT)
+                self.command('wait 200')
+                self.command('type ' + key)
+                self.assertEqual(self.document(), expected)
+
         def test_empty_file_reloads_after_confirmation(self):
             self.start(self.file)
             self.external_write('')
@@ -130,6 +152,7 @@ def main():
                      'close_all_tabs_asks_for_each_modified_file'):
             suite.addTest(editor.EditorMatrix('test_' + name))
     for name in ('same_stamp_same_size_write_reloads', 'same_stamp_conflict_keeps_local_edits',
+                 'same_stamp_settings_apply_live',
                  'empty_file_reloads_after_confirmation', 'save_notification_keeps_new_local_edits'):
         suite.addTest(CoreEditing('test_' + name))
     if args.cases:
