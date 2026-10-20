@@ -211,12 +211,40 @@ FN cmd_goto_line
 1:  ret
 
 FN cmd_open_file
+.ifdef WINDOWS
+    PROLOGUE
+    xor edi, edi
+    call win_pick_path
+    test rax, rax
+    jz 9f
+    mov rbx, rax
+    mov rdi, rax
+    call app_open_path
+    mov rdi, rbx
+    call mem_free
+9:  EPILOGUE
+.else
     xor edi, edi
     jmp browse_open
+.endif
 
 FN cmd_open_folder
+.ifdef WINDOWS
+    PROLOGUE
+    mov edi, 1
+    call win_pick_path
+    test rax, rax
+    jz 9f
+    mov rbx, rax
+    mov rdi, rax
+    call app_switch_project
+    mov rdi, rbx
+    call mem_free
+9:  EPILOGUE
+.else
     mov edi, 1
     jmp browse_open
+.endif
 
 # find in files: the selection (one line) is the initial query
 FN cmd_find_in_files
