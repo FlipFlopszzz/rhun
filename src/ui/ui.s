@@ -523,7 +523,7 @@ FN ui_icon_btn
 # ui_card(x, y, w, h): floating surface with soft shadow and border
 FN ui_card
     PROLOGUE
-    M r8d, MI_12
+    M r8d, MI_8
     M r9d, MI_4
     M eax, MI_RADIUS
     add eax, [rip + g_mt + 4*MI_2]
@@ -560,10 +560,10 @@ FN ui_card_shadow
     mov r8d, [rsp + 4]          # shadow corners grow with the spread, from the body's
     sub r8d, [rip + g_mt + 4*MI_2]
     add r8d, ebx
-    mov r9d, 0x07000000
+    mov r9d, 0x05000000
     cmp dword ptr [rip + g_theme_dark], 0
     jne 1f
-    mov r9d, 0x04000000
+    mov r9d, 0x03000000
 1:  call gfx_round_rect
     M eax, MI_2
     sub ebx, eax
