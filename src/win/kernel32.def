@@ -6,6 +6,7 @@ EXPORTS
     ClosePseudoConsole
     CreateDirectoryW
     CreateEventW
+    CreateFileMappingW
     CreateFileW
     CreateJobObjectW
     CreatePipe
@@ -31,10 +32,12 @@ EXPORTS
     GetEnvironmentVariableW
     GetExitCodeProcess
     GetFileAttributesW
+    GetFileSizeEx
     GetFileInformationByHandle
     GetFinalPathNameByHandleW
     GetLastError
     GetModuleFileNameW
+    MapViewOfFile
     GetModuleHandleW
     GetStdHandle
     GetSystemTimeAsFileTime

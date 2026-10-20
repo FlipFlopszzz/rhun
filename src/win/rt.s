@@ -158,6 +158,63 @@ win_env_default:
     call mem_free
 9:  EPILOGUE
 
+# win_map_file(UTF-8 path) -> mapped read-only view in rax and its length in rdx, or 0.
+#   The view stays valid for the life of the process: a font's data is only faulted in as
+#   its tables are read, and the pages are file backed instead of a private copy.
+FN win_map_file
+    PROLOGUE 112
+    xor r12d, r12d
+    xor r13d, r13d
+    call win_wide
+    test rax, rax
+    jz 9f
+    mov rbx, rax
+    mov rcx, rbx
+    mov edx, 0x80000000             # GENERIC_READ
+    mov r8d, 7                      # FILE_SHARE_READ | WRITE | DELETE
+    xor r9d, r9d
+    mov qword ptr [rsp + 32], 3     # OPEN_EXISTING
+    mov qword ptr [rsp + 40], 0x80  # FILE_ATTRIBUTE_NORMAL
+    mov qword ptr [rsp + 48], 0
+    API CreateFileW
+    mov r14, rax
+    cmp rax, -1
+    je 8f
+    mov rcx, r14
+    lea rdx, [rsp + 96]
+    API GetFileSizeEx
+    test eax, eax
+    jz 7f
+    mov r13, [rsp + 96]
+    test r13, r13
+    jz 7f
+    mov rcx, r14
+    xor edx, edx
+    mov r8d, 2                      # PAGE_READONLY
+    xor r9d, r9d
+    mov qword ptr [rsp + 32], 0
+    mov qword ptr [rsp + 40], 0
+    API CreateFileMappingW
+    mov r15, rax
+    test rax, rax
+    jz 7f
+    mov rcx, rax
+    mov edx, 4                      # FILE_MAP_READ
+    xor r8d, r8d
+    xor r9d, r9d
+    mov qword ptr [rsp + 32], 0
+    API MapViewOfFile
+    mov r12, rax
+    mov rcx, r15
+    API CloseHandle
+7:  mov rcx, r14
+    API CloseHandle
+8:  mov rdi, rbx
+    call mem_free
+9:  mov rax, r12
+    mov rdx, r13
+    EPILOGUE
+
 # win_wide(UTF-8 cstr) -> allocated UTF-16 cstr, or 0. Reject malformed UTF-8.
 FN win_wide
     PROLOGUE 96

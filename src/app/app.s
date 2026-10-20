@@ -161,7 +161,7 @@ FN app_load_fonts
     mov rdi, [rip + cfg_term_font]
     cmp byte ptr [rdi], 0
     je 9f
-    call file_read_all
+    call font_bytes
     test rax, rax
     jz 9f
     mov rdi, rax
@@ -169,6 +169,15 @@ FN app_load_fonts
     call font_load
     mov [rip + g_font_term], rax
 9:  EPILOGUE
+
+# font_bytes(path cstr) -> rax pointer to the font file, rdx its length: mapped where the
+#   platform can, so only the tables in use take memory, and read otherwise
+font_bytes:
+.ifdef WINDOWS
+    jmp win_map_file
+.else
+    jmp file_read_all
+.endif
 
 # load_font_or(builtin ptr, len, path cstr) -> FONT*
 load_font_or:
@@ -178,7 +187,7 @@ load_font_or:
     cmp byte ptr [rdx], 0
     je 1f
     mov rdi, rdx
-    call file_read_all
+    call font_bytes
     test rax, rax
     jz 1f
     mov rdi, rax
