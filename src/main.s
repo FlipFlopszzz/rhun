@@ -104,6 +104,9 @@ FN main
     jmp .Lm_exit
 3:  call loop_run
 .Lm_exit:
+.ifdef WINDOWS
+    call win_save_placement
+.endif
     call agents_shutdown
     call ai_shutdown
     call session_remember_project

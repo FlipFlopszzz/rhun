@@ -13,6 +13,7 @@ EXPORTS
     GetClipboardData
     GetDC
     GetDpiForWindow
+    GetWindowPlacement
     GetKeyState
     IsIconic
     IsZoomed
