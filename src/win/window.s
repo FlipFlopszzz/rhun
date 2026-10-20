@@ -3,6 +3,7 @@
 .bss
 .p2align 4
 win_hwnd: .quad 0
+win_veiled: .long 0
 win_pixels: .quad 0
 win_capacity: .quad 0
 win_width: .long 0
@@ -51,7 +52,7 @@ FN win_open_window
     mov dword ptr [rip + win_bmi], 40
     mov word ptr [rip + win_bmi + 12], 1
     mov word ptr [rip + win_bmi + 14], 32
-    xor ecx, ecx
+    mov ecx, 0x00080000        # WS_EX_LAYERED: opacity hides the window, not window state
     lea rdx, [rip + .Lclass]
     lea r8, [rip + .Ltitle]
     mov r9d, 0x00cf0000
@@ -67,6 +68,16 @@ FN win_open_window
     test rax, rax
     jz 8f
     mov [rip + win_hwnd], rax
+    # hide the window with opacity, not with window state. A cloaked or hidden window is not
+    # composed, and GDI surface updates written while it is not composed are lost (measured:
+    # uncloaking reveals the white initial surface). A layered window at alpha 0 is composed
+    # and drawn like any other, so the first frame really lands; alpha 255 reveals it after.
+    mov rcx, [rip + win_hwnd]
+    xor edx, edx               # no color key
+    xor r8d, r8d               # alpha 0: invisible, yet composed and drawn like any window
+    mov r9d, 2                 # LWA_ALPHA
+    API SetLayeredWindowAttributes
+    mov dword ptr [rip + win_veiled], 1
     # a mode change since win_appearance_init reached no window of rhun's: read the mode again
     call win_setting_changed
     mov rdi, [rip + win_hwnd]
@@ -174,6 +185,15 @@ win_draw:
     mov rcx, [rip + win_hwnd]
     mov rdx, rbx
     API ReleaseDC
+    # the first frame is on the surface: lift the startup opacity
+    cmp dword ptr [rip + win_veiled], 0
+    jz 9f
+    mov dword ptr [rip + win_veiled], 0
+    mov rcx, [rip + win_hwnd]
+    xor edx, edx
+    mov r8d, 255
+    mov r9d, 2                 # LWA_ALPHA
+    API SetLayeredWindowAttributes
 9:  EPILOGUE
 
 win_title:

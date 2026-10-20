@@ -28,6 +28,7 @@ EXPORTS
     SetCursor
     SetForegroundWindow
     SetProcessDpiAwarenessContext
+    SetLayeredWindowAttributes
     SetWindowPos
     SetWindowTextW
     ShowWindow
