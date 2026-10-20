@@ -4,6 +4,13 @@
 .p2align 4
 win_hwnd: .quad 0
 win_veiled: .long 0
+win_want_max: .long 0           # the last window was maximized
+win_rect: .long 0, 0, 0, 0      # its normal position: left, top, width, height
+.p2align 3
+win_place_sb: .zero SB_SIZE
+win_place_out: .zero SB_SIZE
+win_wp: .zero 48                # WINDOWPLACEMENT
+
 win_pixels: .quad 0
 win_capacity: .quad 0
 win_width: .long 0
@@ -52,14 +59,19 @@ FN win_open_window
     mov dword ptr [rip + win_bmi], 40
     mov word ptr [rip + win_bmi + 12], 1
     mov word ptr [rip + win_bmi + 14], 32
+    call win_load_placement
     mov ecx, 0x00080000        # WS_EX_LAYERED: opacity hides the window, not window state
     lea rdx, [rip + .Lclass]
     lea r8, [rip + .Ltitle]
     mov r9d, 0x00cf0000
-    mov dword ptr [rsp + 32], 0x80000000
-    mov dword ptr [rsp + 40], 0x80000000
-    mov qword ptr [rsp + 48], 1280
-    mov qword ptr [rsp + 56], 800
+    mov eax, [rip + win_rect]
+    mov [rsp + 32], rax
+    mov eax, [rip + win_rect + 4]
+    mov [rsp + 40], rax
+    mov eax, [rip + win_rect + 8]
+    mov [rsp + 48], rax
+    mov eax, [rip + win_rect + 12]
+    mov [rsp + 56], rax
     mov qword ptr [rsp + 64], 0
     mov qword ptr [rsp + 72], 0
     mov [rsp + 80], rbx
@@ -89,11 +101,196 @@ FN win_open_window
     mov rcx, [rip + win_hwnd]
     mov edx, 5
     API ShowWindow
+    cmp dword ptr [rip + win_want_max], 0
+    je 1f
     mov rcx, [rip + win_hwnd]
+    mov edx, 3
+    API ShowWindow
+1:  mov rcx, [rip + win_hwnd]
     API UpdateWindow
     EPILOGUE
 8:  lea rdi, [rip + .Lwindow_error]
     call die
+
+# win_placement_file() -> cstr "$XDG_STATE_HOME/rhun/window" in win_place_sb, or 0
+FN win_placement_file
+    PROLOGUE
+    lea rdi, [rip + win_place_sb]
+    call session_state_dir
+    test eax, eax
+    jz 9f
+    lea rdi, [rip + win_place_sb]
+    lea rsi, [rip + .Lwindow]
+    call sb_push_cstr
+    mov rax, [rip + win_place_sb + SB_ptr]
+9:  EPILOGUE
+
+# win_load_placement(): the last window's normal rect and maximized state, or the defaults
+FN win_load_placement
+    PROLOGUE 32
+    mov dword ptr [rip + win_want_max], 0
+    mov dword ptr [rip + win_rect], 0x80000000       # CW_USEDEFAULT
+    mov dword ptr [rip + win_rect + 4], 0x80000000
+    mov dword ptr [rip + win_rect + 8], 1280
+    mov dword ptr [rip + win_rect + 12], 800
+    call win_placement_file
+    test rax, rax
+    jz 9f
+    mov rdi, rax
+    call file_read_all
+    test rax, rax
+    jz 9f
+    mov r12, rax
+    mov r13, rdx
+    xor ebx, ebx
+    call win_parse_i32
+    test ecx, ecx
+    jz 8f
+    mov r14d, eax
+    call win_parse_i32
+    test ecx, ecx
+    jz 8f
+    mov r15d, eax
+    call win_parse_i32
+    test ecx, ecx
+    jz 8f
+    mov [rsp], eax
+    call win_parse_i32
+    test ecx, ecx
+    jz 8f
+    mov [rsp + 4], eax
+    # a rect too small to hold the window is not worth restoring
+    mov eax, [rsp]
+    sub eax, r14d
+    cmp eax, 100
+    jl 8f
+    mov edx, eax
+    mov eax, [rsp + 4]
+    sub eax, r15d
+    cmp eax, 100
+    jl 8f
+    mov dword ptr [rip + win_rect], r14d
+    mov dword ptr [rip + win_rect + 4], r15d
+    mov dword ptr [rip + win_rect + 8], edx
+    mov dword ptr [rip + win_rect + 12], eax
+    call win_parse_i32
+    test ecx, ecx
+    jz 8f
+    mov [rip + win_want_max], eax
+8:  mov rdi, r12
+    call mem_free
+9:  EPILOGUE
+
+# win_parse_i32(): the next integer of the file in r12 (r13 bytes), cursor rbx
+#   -> eax value, ecx 1; ecx 0 at the end
+win_parse_i32:
+    xor ecx, ecx
+1:  cmp rbx, r13
+    jae 9f
+    movzx eax, byte ptr [r12 + rbx]
+    cmp eax, ' '
+    je 2f
+    cmp eax, 9
+    je 2f
+    cmp eax, 10
+    je 2f
+    cmp eax, 13
+    je 2f
+    jmp 3f
+2:  inc rbx
+    jmp 1b
+3:  xor r8d, r8d
+    cmp eax, '-'
+    jne 4f
+    mov r8d, 1
+    inc rbx
+4:  xor edx, edx
+    xor ecx, ecx
+5:  cmp rbx, r13
+    jae 6f
+    movzx eax, byte ptr [r12 + rbx]
+    sub eax, '0'
+    cmp eax, 9
+    ja 6f
+    imul edx, edx, 10
+    add edx, eax
+    inc rbx
+    inc ecx
+    jmp 5b
+6:  test ecx, ecx
+    jz 9f
+    test r8d, r8d
+    jz 7f
+    neg edx
+7:  mov eax, edx
+    mov ecx, 1
+    ret
+9:  xor ecx, ecx
+    ret
+
+# win_push_i32(value edi, separator esi): append the number and the separator to win_place_out
+win_push_i32:
+    push rbx
+    push r12
+    sub rsp, 8                  # two pushes leave the stack 8 bytes off for the calls
+    mov r12d, esi
+    mov ebx, edi
+    test ebx, ebx
+    jns 1f
+    lea rdi, [rip + win_place_out]
+    mov esi, '-'
+    call sb_push_byte
+    neg ebx
+1:  lea rdi, [rip + win_place_out]
+    mov esi, ebx
+    call sb_push_u64
+    lea rdi, [rip + win_place_out]
+    mov esi, r12d
+    call sb_push_byte
+    add rsp, 8
+    pop r12
+    pop rbx
+    ret
+
+# win_save_placement(): remember the normal rect and whether the window is maximized
+FN win_save_placement
+    PROLOGUE 32
+    mov rcx, [rip + win_hwnd]
+    test rcx, rcx
+    jz 9f
+    mov dword ptr [rip + win_wp], 44                 # sizeof(WINDOWPLACEMENT)
+    lea rdx, [rip + win_wp]
+    API GetWindowPlacement
+    test eax, eax
+    jz 9f
+    call win_placement_file
+    test rax, rax
+    jz 9f
+    mov r12, rax
+    lea rdi, [rip + win_place_out]
+    call sb_clear
+    mov edi, [rip + win_wp + 28]                     # rcNormalPosition
+    mov esi, ' '
+    call win_push_i32
+    mov edi, [rip + win_wp + 32]
+    mov esi, ' '
+    call win_push_i32
+    mov edi, [rip + win_wp + 36]
+    mov esi, ' '
+    call win_push_i32
+    mov edi, [rip + win_wp + 40]
+    mov esi, ' '
+    call win_push_i32
+    xor edi, edi
+    cmp dword ptr [rip + win_wp + 8], 3              # SW_SHOWMAXIMIZED
+    sete dil
+    mov esi, 10
+    call win_push_i32
+    mov rdi, r12
+    mov rsi, [rip + win_place_out + SB_ptr]
+    mov rdx, [rip + win_place_out + SB_len]
+    call file_write_all
+9:  EPILOGUE
 
 # An explicit file launch brings its window forward, including a minimized startup state.
 FN win_activate
@@ -839,6 +1036,7 @@ win_platform:
     .long 37,KEY_LEFT,38,KEY_UP,39,KEY_RIGHT,40,KEY_DOWN,45,KEY_INSERT,46,KEY_DELETE
     .long 112,KEY_F1,113,KEY_F1+1,114,KEY_F1+2,115,KEY_F1+3,116,KEY_F1+4,117,KEY_F1+5
     .long 118,KEY_F1+6,119,KEY_F1+7,120,KEY_F1+8,121,KEY_F1+9,122,KEY_F1+10,123,KEY_F1+11,0,0
+.Lwindow: .asciz "/window"
 .Lwindow_error: .asciz "rhun: could not create a Windows window"
 
 .data
